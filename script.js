@@ -1,981 +1,148 @@
-const questions = document.querySelectorAll(".question");
+/*
+  Cleaned client script: modal, registration, simple localStorage docs, admin CRUD.
+*/
 
-if (questions.length) {
-  questions.forEach((question) => {
-    question.addEventListener("click", () => {
-      alert("Answer will appear here");
-    });
-  });
-}
+const questions = document.querySelectorAll('.question');
+questions.forEach(q => q.addEventListener('click', () => {
+  const plus = q.querySelector('span');
+  if (plus) plus.textContent = plus.textContent === '+' ? '-' : '+';
+}));
 
-const adminForm = document.getElementById("admin-doc-form");
-const adminMessage = document.getElementById("admin-message");
-const adminList = document.getElementById("admin-list");
-const adminPhotoInput = document.getElementById("admin-photo");
-const adminPhotoPreview = document.getElementById("admin-photo-preview");
-const otpForm = document.getElementById("otp-form");
-const otpMessage = document.getElementById("otp-message");
-const docTitle = document.getElementById("doc-title");
-const docClient = document.getElementById("doc-client");
-const docBody = document.getElementById("doc-body");
-const docPhoto = document.getElementById("doc-photo");
-const receiptForm = document.getElementById("receipt-form");
-const receiptPhotoInput = document.getElementById("receipt-photo");
-const receiptPreview = document.getElementById("receipt-preview");
-const receiptMessage = document.getElementById("receipt-message");
+const STORAGE_KEY = 'clientDocs';
 
-let adminPhotoData = "";
-let receiptPhotoData = "";
-
-// Supabase + Firebase initialization (config.example.js should set globals)
-const SUPABASE_URL = window.SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
-const SUPABASE_BUCKET = window.SUPABASE_BUCKET || "uploads";
-let supabaseClient = null;
-if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
-  supabaseClient = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY,
-  );
-} else {
-  console.warn(
-    "Supabase not configured. Files will be stored in localStorage.",
-  );
-}
-
-if (window.FIREBASE_CONFIG && window.firebase) {
+// Ensure critical listeners are attached after load (fixes race on some hosts)
+window.addEventListener('load', () => {
   try {
-    firebase.initializeApp(window.FIREBASE_CONFIG);
+    const btn = document.getElementById('register-toggle');
+    const modal = document.getElementById('register-modal');
+    const closeBtn = document.getElementById('register-close');
+    if (btn && modal && !btn._initAttached) {
+      btn.addEventListener('click', () => { modal.style.display = 'flex'; const first = document.getElementById('client-name'); if (first) first.focus(); });
+      if (closeBtn) closeBtn.addEventListener('click', () => modal.style.display = 'none');
+      modal.addEventListener('click', ev => { if (ev.target === modal) modal.style.display = 'none'; });
+      btn._initAttached = true;
+    }
   } catch (e) {
-    // already initialized
+    console.warn('Error attaching load listeners', e);
   }
-} else {
-  console.warn("Firebase not configured. Authentication will be offline.");
+});
+
+function loadDocs() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveDocs(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+
+// Register modal
+const registerToggle = document.getElementById('register-toggle');
+const registerModal = document.getElementById('register-modal');
+const registerClose = document.getElementById('register-close');
+const clientForm = document.getElementById('client-register-form');
+const clientPhotoInput = document.getElementById('client-photo');
+const clientPhotoPreview = document.getElementById('client-photo-preview');
+const registerMessage = document.getElementById('register-message');
+
+let clientPhotoData = '';
+
+if (registerToggle && registerModal) {
+  registerToggle.addEventListener('click', () => {
+    registerModal.style.display = 'flex';
+    const first = document.getElementById('client-name'); if (first) first.focus();
+  });
+}
+if (registerClose && registerModal) registerClose.addEventListener('click', () => registerModal.style.display = 'none');
+if (registerModal) registerModal.addEventListener('click', ev => { if (ev.target === registerModal) registerModal.style.display = 'none'; });
+
+if (clientPhotoInput) {
+  clientPhotoInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) { clientPhotoData = ''; if (clientPhotoPreview) clientPhotoPreview.style.display = 'none'; return; }
+    if (!file.type.startsWith('image/')) { clientPhotoData = ''; if (clientPhotoPreview) clientPhotoPreview.style.display = 'none'; return; }
+    const r = new FileReader();
+    r.onload = () => { clientPhotoData = r.result; if (clientPhotoPreview) { clientPhotoPreview.src = clientPhotoData; clientPhotoPreview.style.display = 'block'; } };
+    r.readAsDataURL(file);
+  });
 }
 
-// file objects for upload (prefer supabase when configured)
-let clientPhotoFile = null;
-let adminPhotoFile = null;
-let receiptPhotoFile = null;
-
-const STORAGE_KEY = "clientDocs";
-
-// Client registration handling
-const registerToggle = document.getElementById("register-toggle");
-const clientForm = document.getElementById("client-register-form");
-const clientPhotoInput = document.getElementById("client-photo");
-const clientPhotoPreview = document.getElementById("client-photo-preview");
-const registerMessage = document.getElementById("register-message");
-
-let clientPhotoData = "";
-
-if (registerToggle && clientForm) {
-  const registerModal = document.getElementById("register-modal");
-  const registerClose = document.getElementById("register-close");
-
-  // open modal
-  registerToggle.addEventListener("click", () => {
-    if (registerModal) {
-      registerModal.style.display = "flex";
-      // focus first input
-      const first = document.getElementById("client-name");
-      if (first) first.focus();
-    }
-  });
-
-  // close modal handlers
-  if (registerClose) {
-    registerClose.addEventListener("click", () => {
-      if (registerModal) registerModal.style.display = "none";
-    });
-  }
-
-  if (registerModal) {
-    registerModal.addEventListener("click", (ev) => {
-      if (ev.target === registerModal) {
-        registerModal.style.display = "none";
-      }
-    });
-  }
-
-  // preview client photo (store File object for upload)
-  if (clientPhotoInput) {
-    clientPhotoInput.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      clientPhotoFile = null;
-      if (file && file.type.startsWith("image/")) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          clientPhotoData = reader.result;
-          clientPhotoFile = file;
-          if (clientPhotoPreview) {
-            clientPhotoPreview.src = clientPhotoData;
-            clientPhotoPreview.style.display = "block";
-          }
-        };
-        reader.readAsDataURL(file);
-      } else {
-        clientPhotoData = "";
-        if (clientPhotoPreview) {
-          clientPhotoPreview.src = "";
-          clientPhotoPreview.style.display = "none";
-        }
-      }
-    });
-  }
-
-  clientForm.addEventListener("submit", async (e) => {
+if (clientForm) {
+  clientForm.addEventListener('submit', e => {
     e.preventDefault();
-    const name = document.getElementById("client-name").value.trim();
-    const age = document.getElementById("client-age").value.trim();
-    const gender = document.getElementById("client-gender").value;
-    const email = document.getElementById("client-email").value.trim();
-    const phone = document.getElementById("client-phone").value.trim();
-    const dob = document.getElementById("client-dob").value;
-    const place = document.getElementById("client-place").value.trim();
-    const country = document.getElementById("client-country").value.trim();
-    const passport = document.getElementById("client-passport").value.trim();
+    const name = (document.getElementById('client-name')||{}).value || '';
+    const age = (document.getElementById('client-age')||{}).value || '';
+    const gender = (document.getElementById('client-gender')||{}).value || '';
+    const email = (document.getElementById('client-email')||{}).value || '';
+    const phone = (document.getElementById('client-phone')||{}).value || '';
+    const dob = (document.getElementById('client-dob')||{}).value || '';
+    const place = (document.getElementById('client-place')||{}).value || '';
+    const country = (document.getElementById('client-country')||{}).value || '';
+    const passport = (document.getElementById('client-passport')||{}).value || '';
 
-    if (
-      !name ||
-      !age ||
-      !gender ||
-      !email ||
-      !phone ||
-      !dob ||
-      !place ||
-      !country ||
-      !passport
-    ) {
-      if (registerMessage)
-        registerMessage.innerText = "Please fill all required fields.";
+    if (!name||!age||!gender||!email||!phone||!dob||!place||!country||!passport) {
+      if (registerMessage) registerMessage.innerText = 'Please fill all required fields.';
       return;
     }
 
-    // generate unique OTP
     const docs = loadDocs();
     let otp;
-    do {
-      otp = Math.floor(100000 + Math.random() * 900000).toString();
-    } while (docs[otp]);
-
-    // upload client photo to Supabase if configured
-    let photoUrl = clientPhotoData;
-    if (supabaseClient && clientPhotoFile) {
-      try {
-        const ext = clientPhotoFile.name.split(".").pop();
-        const remotePath = `clients/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const { error } = await supabaseClient.storage
-          .from(SUPABASE_BUCKET)
-          .upload(remotePath, clientPhotoFile);
-        if (!error) {
-          const { publicUrl } = supabaseClient.storage
-            .from(SUPABASE_BUCKET)
-            .getPublicUrl(remotePath);
-          photoUrl = publicUrl || photoUrl;
-        } else {
-          console.warn(
-            "Supabase upload failed, falling back to local dataURL",
-            error,
-          );
-        }
-      } catch (err) {
-        console.error("Error uploading to Supabase", err);
-      }
-    }
+    do { otp = Math.floor(100000 + Math.random()*900000).toString(); } while (docs[otp]);
 
     docs[otp] = {
-      name,
-      age,
-      gender,
-      email,
-      phone,
-      dob,
-      place,
-      country,
-      passport,
-      photo: photoUrl,
-      submittedAt: new Date().toISOString(),
+      name, age, gender, email, phone, dob, place, country, passport,
+      photo: clientPhotoData || '', submittedAt: new Date().toISOString()
     };
 
     saveDocs(docs);
-    if (registerMessage)
-      registerMessage.innerText = `Submitted. OTP: ${otp} — saved. You can visit the admin page to review.`;
-    // close modal and stay on homepage
-    if (registerModal) registerModal.style.display = "none";
-    setTimeout(() => {
-      window.location.href = `index.html`;
-    }, 700);
+    if (registerMessage) registerMessage.innerText = `Submitted. OTP: ${otp} — saved.`;
+    if (registerModal) registerModal.style.display = 'none';
+    clientForm.reset();
+    if (clientPhotoPreview) { clientPhotoPreview.src=''; clientPhotoPreview.style.display='none'; }
+    setTimeout(() => { window.location.href = 'index.html'; }, 700);
   });
 }
 
-function loadDocs() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-  } catch (err) {
-    return {};
-  }
+// Admin document manager (simple localStorage)
+const adminForm = document.getElementById('admin-doc-form');
+const adminMessage = document.getElementById('admin-message');
+const adminList = document.getElementById('admin-list');
+const adminPhotoInput = document.getElementById('admin-photo');
+const adminPhotoPreview = document.getElementById('admin-photo-preview');
+let adminPhotoData = '';
+
+if (adminPhotoInput) {
+  adminPhotoInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f || !f.type.startsWith('image/')) { adminPhotoData=''; if (adminPhotoPreview) adminPhotoPreview.style.display='none'; return; }
+    const r = new FileReader(); r.onload = () => { adminPhotoData = r.result; if (adminPhotoPreview) { adminPhotoPreview.src = adminPhotoData; adminPhotoPreview.style.display='block'; } }; r.readAsDataURL(f);
+  });
 }
 
-function saveDocs(docs) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
-}
-
-function deleteDoc(otp) {
-  const docs = loadDocs();
-  if (docs[otp]) {
-    delete docs[otp];
-    saveDocs(docs);
-    renderAdminList();
-  }
-}
-
-function renderAdminList() {
+function renderAdminList(){
   if (!adminList) return;
   const docs = loadDocs();
   const keys = Object.keys(docs);
-  if (!keys.length) {
-    adminList.innerHTML = "<p>No client docs saved yet.</p>";
-    return;
-  }
-  adminList.innerHTML = keys
-    .map((otp) => {
-      const doc = docs[otp];
-      const displayName = doc.name || doc.clientName || "Unnamed";
-      const docTitle = doc.title || "Client Registration";
-      const content = doc.content || "Client registration details.";
-      const fields = [];
-      if (doc.age) fields.push(`<strong>Age:</strong> ${doc.age}`);
-      if (doc.gender) fields.push(`<strong>Gender:</strong> ${doc.gender}`);
-      if (doc.email) fields.push(`<strong>Email:</strong> ${doc.email}`);
-      if (doc.phone) fields.push(`<strong>Phone:</strong> ${doc.phone}`);
-      if (doc.dob) fields.push(`<strong>DOB:</strong> ${doc.dob}`);
-      if (doc.place)
-        fields.push(`<strong>Place of Birth:</strong> ${doc.place}`);
-      if (doc.country) fields.push(`<strong>Country:</strong> ${doc.country}`);
-      if (doc.passport)
-        fields.push(`<strong>Passport #:</strong> ${doc.passport}`);
-      return `
-        <div class="admin-item">
-          <div class="admin-item-header">
-            <strong>OTP:</strong> ${otp}
-            <span class="admin-item-title">${docTitle}</span>
-          </div>
-          <div class="admin-item-body">
-            <p><strong>Name:</strong> ${displayName}</p>
-            ${fields.map((field) => `<p>${field}</p>`).join("")}
-            <p><strong>Saved At:</strong> ${new Date(doc.savedAt || doc.submittedAt || Date.now()).toLocaleString()}</p>
-            ${doc.photo ? `<img class="admin-item-photo" src="${doc.photo}" alt="Client photo" />` : ""}
-            ${doc.receiptPhoto ? `<p><strong>Receipt Submitted:</strong> ${new Date(doc.receiptSubmittedAt || Date.now()).toLocaleString()}</p><img class="admin-item-photo" src="${doc.receiptPhoto}" alt="Receipt photo" />` : ""}
-            <p>${content}</p>
-            <button class="admin-delete-button" data-otp="${otp}">Delete</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
+  if (!keys.length) { adminList.innerHTML = '<p>No client docs saved yet.</p>'; return; }
+  adminList.innerHTML = keys.map(otp => {
+    const d = docs[otp];
+    return `<div class="admin-item"><div><strong>OTP:</strong> ${otp}</div><div><p><strong>Name:</strong> ${d.name}</p><p>${d.content||''}</p>${d.photo?`<img src="${d.photo}" style="max-width:160px"/>`:''}<p><button class="admin-delete-button" data-otp="${otp}">Delete</button></p></div></div>`;
+  }).join('');
 }
 
-if (adminPhotoInput) {
-  adminPhotoInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
-    adminPhotoFile = null;
-    if (file && file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        adminPhotoData = reader.result;
-        adminPhotoFile = file;
-        if (adminPhotoPreview) {
-          adminPhotoPreview.src = adminPhotoData;
-          adminPhotoPreview.style.display = "block";
-        }
-      };
-      reader.readAsDataURL(file);
-    } else {
-      adminPhotoData = "";
-      if (adminPhotoPreview) {
-        adminPhotoPreview.src = "";
-        adminPhotoPreview.style.display = "none";
-      }
+if (adminList) {
+  adminList.addEventListener('click', e => {
+    const t = e.target;
+    if (t.matches && t.matches('.admin-delete-button')) {
+      const otp = t.getAttribute('data-otp'); if (!otp) return; const docs = loadDocs(); delete docs[otp]; saveDocs(docs); renderAdminList();
     }
   });
 }
 
 if (adminForm) {
-  adminForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const otp = document.getElementById("admin-otp").value.trim();
-    const name = document.getElementById("admin-client-name").value.trim();
-    const title = document.getElementById("admin-doc-title").value.trim();
-    const content = document.getElementById("admin-doc-content").value.trim();
-
-    if (!otp || !name || !title || !content) {
-      adminMessage.innerText = "Please complete all fields.";
-      return;
-    }
-
-    const docs = loadDocs();
-    (async () => {
-      let photoUrl = adminPhotoData;
-      if (supabaseClient && adminPhotoFile) {
-        try {
-          const ext = adminPhotoFile.name.split(".").pop();
-          const remotePath = `admin/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-          const { error } = await supabaseClient.storage
-            .from(SUPABASE_BUCKET)
-            .upload(remotePath, adminPhotoFile);
-          if (!error) {
-            const { publicUrl } = supabaseClient.storage
-              .from(SUPABASE_BUCKET)
-              .getPublicUrl(remotePath);
-            photoUrl = publicUrl || photoUrl;
-          } else {
-            console.warn("Supabase admin upload failed", error);
-          }
-        } catch (err) {
-          console.error("Error uploading admin photo", err);
-        }
-      }
-
-      docs[otp] = {
-        name,
-        title,
-        content,
-        photo: photoUrl,
-        savedAt: new Date().toISOString(),
-      };
-
-      saveDocs(docs);
-      adminMessage.innerText = `Saved document for OTP ${otp}.`;
-      renderAdminList();
-      adminForm.reset();
-      adminPhotoData = "";
-      adminPhotoFile = null;
-      if (adminPhotoPreview) {
-        adminPhotoPreview.src = "";
-        adminPhotoPreview.style.display = "none";
-      }
-    })();
-  });
-  renderAdminList();
-
-  if (adminList) {
-    adminList.addEventListener("click", (event) => {
-      const target = event.target;
-      if (target.matches && target.matches(".admin-delete-button")) {
-        const otp = target.getAttribute("data-otp");
-        if (otp) {
-          deleteDoc(otp);
-        }
-      }
-    });
-  }
-}
-
-if (otpForm) {
-  otpForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const otp = document.getElementById("otp-code").value.trim();
-    const docs = loadDocs();
-    if (otp && docs[otp]) {
-      window.location.href = `doc.html?otp=${encodeURIComponent(otp)}`;
-    } else {
-      otpMessage.innerText = "OTP not found. Please check the number.";
-    }
-  });
-}
-
-if (docTitle && docClient && docBody) {
-  const params = new URLSearchParams(window.location.search);
-  const otp = params.get("otp");
-  const docs = loadDocs();
-  if (otp && docs[otp]) {
-    const doc = docs[otp];
-    docTitle.innerText = doc.title || "Client Document";
-    docClient.innerText = `Name: ${doc.name || "Unknown"}`;
-    if (docPhoto) {
-      if (doc.photo) {
-        docPhoto.src = doc.photo;
-        docPhoto.style.display = "block";
-      } else {
-        docPhoto.style.display = "none";
-      }
-    }
-    docBody.innerText =
-      doc.content || "Client document details are available here.";
-
-    if (receiptPreview && doc.receiptPhoto) {
-      receiptPreview.src = doc.receiptPhoto;
-      receiptPreview.style.display = "block";
-      if (receiptMessage)
-        receiptMessage.innerText =
-          "A receipt has already been submitted. You may upload a new one if needed.";
-    }
-
-    if (receiptPhotoInput) {
-      receiptPhotoInput.addEventListener("change", (event) => {
-        const file = event.target.files[0];
-        receiptPhotoFile = null;
-        if (file && file.type.startsWith("image/")) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            receiptPhotoData = reader.result;
-            receiptPhotoFile = file;
-            if (receiptPreview) {
-              receiptPreview.src = receiptPhotoData;
-              receiptPreview.style.display = "block";
-            }
-          };
-          reader.readAsDataURL(file);
-        } else {
-          receiptPhotoData = "";
-          if (receiptPreview) {
-            receiptPreview.style.display = "none";
-          }
-        }
-      });
-    }
-
-    if (receiptForm) {
-      receiptForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!receiptPhotoData && !receiptPhotoFile) {
-          if (receiptMessage)
-            receiptMessage.innerText =
-              "Please choose a receipt photo before submitting.";
-          return;
-        }
-
-        let receiptUrl = receiptPhotoData;
-        if (supabaseClient && receiptPhotoFile) {
-          try {
-            const ext = receiptPhotoFile.name.split(".").pop();
-            const remotePath = `receipts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-            const { error } = await supabaseClient.storage
-              .from(SUPABASE_BUCKET)
-              .upload(remotePath, receiptPhotoFile);
-            if (!error) {
-              const { publicUrl } = supabaseClient.storage
-                .from(SUPABASE_BUCKET)
-                .getPublicUrl(remotePath);
-              receiptUrl = publicUrl || receiptUrl;
-            } else {
-              console.warn("Supabase receipt upload failed", error);
-            }
-          } catch (err) {
-            console.error("Error uploading receipt", err);
-          }
-        }
-
-        const docs = loadDocs();
-        docs[otp] = {
-          ...doc,
-          receiptPhoto: receiptUrl,
-          receiptSubmittedAt: new Date().toISOString(),
-        };
-        saveDocs(docs);
-        if (receiptMessage)
-          receiptMessage.innerText = "Receipt submitted successfully.";
-        receiptPhotoData = "";
-        receiptPhotoFile = null;
-        if (receiptPreview) {
-          receiptPreview.src = "";
-          receiptPreview.style.display = "none";
-        }
-        if (receiptForm) {
-          receiptForm.reset();
-        }
-      });
-    }
-  } else {
-    docTitle.innerText = "Document Not Found";
-    docClient.innerText = "Invalid or expired OTP.";
-    if (docPhoto) {
-      docPhoto.style.display = "none";
-    }
-    docBody.innerText = "Please go back and enter a valid OTP.";
-  }
-}
-
-const adminForm = document.getElementById("admin-doc-form");
-const adminMessage = document.getElementById("admin-message");
-const adminList = document.getElementById("admin-list");
-const adminPhotoInput = document.getElementById("admin-photo");
-const adminPhotoPreview = document.getElementById("admin-photo-preview");
-const otpForm = document.getElementById("otp-form");
-const otpMessage = document.getElementById("otp-message");
-const docTitle = document.getElementById("doc-title");
-const docClient = document.getElementById("doc-client");
-const docBody = document.getElementById("doc-body");
-const docPhoto = document.getElementById("doc-photo");
-const receiptForm = document.getElementById("receipt-form");
-const receiptPhotoInput = document.getElementById("receipt-photo");
-const receiptPreview = document.getElementById("receipt-preview");
-const receiptMessage = document.getElementById("receipt-message");
-
-let adminPhotoData = "";
-let receiptPhotoData = "";
-
-// Supabase + Firebase initialization (config.example.js should set globals)
-const SUPABASE_URL = window.SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
-const SUPABASE_BUCKET = window.SUPABASE_BUCKET || "uploads";
-let supabaseClient = null;
-if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
-  supabaseClient = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY,
-  );
-} else {
-  console.warn(
-    "Supabase not configured. Files will be stored in localStorage.",
-  );
-}
-
-if (window.FIREBASE_CONFIG && window.firebase) {
-  try {
-    firebase.initializeApp(window.FIREBASE_CONFIG);
-  } catch (e) {
-    // already initialized
-  }
-} else {
-  console.warn("Firebase not configured. Authentication will be offline.");
-}
-
-// file objects for upload (prefer supabase when configured)
-let clientPhotoFile = null;
-let adminPhotoFile = null;
-let receiptPhotoFile = null;
-
-const STORAGE_KEY = "clientDocs";
-
-// Client registration handling
-const registerToggle = document.getElementById("register-toggle");
-const clientForm = document.getElementById("client-register-form");
-const clientPhotoInput = document.getElementById("client-photo");
-const clientPhotoPreview = document.getElementById("client-photo-preview");
-const registerMessage = document.getElementById("register-message");
-
-let clientPhotoData = "";
-
-if (registerToggle && clientForm) {
-  const registerModal = document.getElementById("register-modal");
-  const registerClose = document.getElementById("register-close");
-
-  // open modal
-  registerToggle.addEventListener("click", () => {
-    if (registerModal) {
-      registerModal.style.display = "flex";
-      // focus first input
-      const first = document.getElementById("client-name");
-      if (first) first.focus();
-    }
-  });
-
-  // close modal handlers
-  if (registerClose) {
-    registerClose.addEventListener("click", () => {
-      if (registerModal) registerModal.style.display = "none";
-    });
-  }
-
-  if (registerModal) {
-    registerModal.addEventListener("click", (ev) => {
-      if (ev.target === registerModal) {
-        registerModal.style.display = "none";
-      }
-    });
-  }
-
-  // preview client photo (store File object for upload)
-  if (clientPhotoInput) {
-    clientPhotoInput.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      clientPhotoFile = null;
-      if (file && file.type.startsWith("image/")) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          clientPhotoData = reader.result;
-          clientPhotoFile = file;
-          if (clientPhotoPreview) {
-            clientPhotoPreview.src = clientPhotoData;
-            clientPhotoPreview.style.display = "block";
-          }
-        };
-        reader.readAsDataURL(file);
-      } else {
-        clientPhotoData = "";
-        if (clientPhotoPreview) {
-          clientPhotoPreview.src = "";
-          clientPhotoPreview.style.display = "none";
-        }
-      }
-    });
-  }
-
-  clientForm.addEventListener("submit", async (e) => {
+  adminForm.addEventListener('submit', e => {
     e.preventDefault();
-    const name = document.getElementById("client-name").value.trim();
-    const age = document.getElementById("client-age").value.trim();
-    const gender = document.getElementById("client-gender").value;
-    const email = document.getElementById("client-email").value.trim();
-    const phone = document.getElementById("client-phone").value.trim();
-    const dob = document.getElementById("client-dob").value;
-    const place = document.getElementById("client-place").value.trim();
-    const country = document.getElementById("client-country").value.trim();
-    const passport = document.getElementById("client-passport").value.trim();
+    const otp = (document.getElementById('admin-otp')||{}).value || '';
+    const name = (document.getElementById('admin-client-name')||{}).value || '';
+    const title = (document.getElementById('admin-doc-title')||{}).value || '';
 
-    if (
-      !name ||
-      !age ||
-      !gender ||
-      !email ||
-      !phone ||
-      !dob ||
-      !place ||
-      !country ||
-      !passport
-    ) {
-      if (registerMessage)
-        registerMessage.innerText = "Please fill all required fields.";
-      return;
-    }
-
-    // generate unique OTP
-    const docs = loadDocs();
-    let otp;
-    do {
-      otp = Math.floor(100000 + Math.random() * 900000).toString();
-    } while (docs[otp]);
-
-    // upload client photo to Supabase if configured
-    let photoUrl = clientPhotoData;
-    if (supabaseClient && clientPhotoFile) {
-      try {
-        const ext = clientPhotoFile.name.split(".").pop();
-        const remotePath = `clients/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const { error } = await supabaseClient.storage
-          .from(SUPABASE_BUCKET)
-          .upload(remotePath, clientPhotoFile);
-        if (!error) {
-          const { publicUrl } = supabaseClient.storage
-            .from(SUPABASE_BUCKET)
-            .getPublicUrl(remotePath);
-          photoUrl = publicUrl || photoUrl;
-        } else {
-          console.warn(
-            "Supabase upload failed, falling back to local dataURL",
-            error,
-          );
-        }
-      } catch (err) {
-        console.error("Error uploading to Supabase", err);
-      }
-    }
-
-    docs[otp] = {
-      name,
-      age,
-      gender,
-      email,
-      phone,
-      dob,
-      place,
-      country,
-      passport,
-      photo: photoUrl,
-      submittedAt: new Date().toISOString(),
-    };
-
-    saveDocs(docs);
-    if (registerMessage)
-      registerMessage.innerText = `Submitted. OTP: ${otp} — saved. You can visit the admin page to review.`;
-    // close modal and stay on homepage
-    if (registerModal) registerModal.style.display = "none";
-    setTimeout(() => {
-      window.location.href = `index.html`;
-    }, 700);
-  });
-}
-
-function loadDocs() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-  } catch (err) {
-    return {};
-  }
-}
-
-function saveDocs(docs) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
-}
-
-function deleteDoc(otp) {
-  const docs = loadDocs();
-  if (docs[otp]) {
-    delete docs[otp];
-    saveDocs(docs);
-    renderAdminList();
-  }
-}
-
-function renderAdminList() {
-  if (!adminList) return;
-  const docs = loadDocs();
-  const keys = Object.keys(docs);
-  if (!keys.length) {
-    adminList.innerHTML = "<p>No client docs saved yet.</p>";
-    return;
-  }
-  adminList.innerHTML = keys
-    .map((otp) => {
-      const doc = docs[otp];
-      const displayName = doc.name || doc.clientName || "Unnamed";
-      const docTitle = doc.title || "Client Registration";
-      const content = doc.content || "Client registration details.";
-      const fields = [];
-      if (doc.age) fields.push(`<strong>Age:</strong> ${doc.age}`);
-      if (doc.gender) fields.push(`<strong>Gender:</strong> ${doc.gender}`);
-      if (doc.email) fields.push(`<strong>Email:</strong> ${doc.email}`);
-      if (doc.phone) fields.push(`<strong>Phone:</strong> ${doc.phone}`);
-      if (doc.dob) fields.push(`<strong>DOB:</strong> ${doc.dob}`);
-      if (doc.place)
-        fields.push(`<strong>Place of Birth:</strong> ${doc.place}`);
-      if (doc.country) fields.push(`<strong>Country:</strong> ${doc.country}`);
-      if (doc.passport)
-        fields.push(`<strong>Passport #:</strong> ${doc.passport}`);
-      return `
-        <div class="admin-item">
-          <div class="admin-item-header">
-            <strong>OTP:</strong> ${otp}
-            <span class="admin-item-title">${docTitle}</span>
-          </div>
-          <div class="admin-item-body">
-            <p><strong>Name:</strong> ${displayName}</p>
-            ${fields.map((field) => `<p>${field}</p>`).join("")}
-            <p><strong>Saved At:</strong> ${new Date(doc.savedAt || doc.submittedAt || Date.now()).toLocaleString()}</p>
-            ${doc.photo ? `<img class="admin-item-photo" src="${doc.photo}" alt="Client photo" />` : ""}
-            ${doc.receiptPhoto ? `<p><strong>Receipt Submitted:</strong> ${new Date(doc.receiptSubmittedAt || Date.now()).toLocaleString()}</p><img class="admin-item-photo" src="${doc.receiptPhoto}" alt="Receipt photo" />` : ""}
-            <p>${content}</p>
-            <button class="admin-delete-button" data-otp="${otp}">Delete</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
-}
-
-if (adminPhotoInput) {
-  adminPhotoInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
-    adminPhotoFile = null;
-    if (file && file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        adminPhotoData = reader.result;
-        adminPhotoFile = file;
-        if (adminPhotoPreview) {
-          adminPhotoPreview.src = adminPhotoData;
-          adminPhotoPreview.style.display = "block";
-        }
-      };
-      reader.readAsDataURL(file);
-    } else {
-      adminPhotoData = "";
-      if (adminPhotoPreview) {
-        adminPhotoPreview.src = "";
-        adminPhotoPreview.style.display = "none";
-      }
-    }
-  });
-}
-
-if (adminForm) {
-  adminForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const otp = document.getElementById("admin-otp").value.trim();
-    const name = document.getElementById("admin-client-name").value.trim();
-    const title = document.getElementById("admin-doc-title").value.trim();
-    const content = document.getElementById("admin-doc-content").value.trim();
-
-    if (!otp || !name || !title || !content) {
-      adminMessage.innerText = "Please complete all fields.";
-      return;
-    }
-
-    const docs = loadDocs();
-    (async () => {
-      let photoUrl = adminPhotoData;
-      if (supabaseClient && adminPhotoFile) {
-        try {
-          const ext = adminPhotoFile.name.split(".").pop();
-          const remotePath = `admin/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-          const { error } = await supabaseClient.storage
-            .from(SUPABASE_BUCKET)
-            .upload(remotePath, adminPhotoFile);
-          if (!error) {
-            const { publicUrl } = supabaseClient.storage
-              .from(SUPABASE_BUCKET)
-              .getPublicUrl(remotePath);
-            photoUrl = publicUrl || photoUrl;
-          } else {
-            console.warn("Supabase admin upload failed", error);
-          }
-        } catch (err) {
-          console.error("Error uploading admin photo", err);
-        }
-      }
-
-      docs[otp] = {
-        name,
-        title,
-        content,
-        photo: photoUrl,
-        savedAt: new Date().toISOString(),
-      };
-
-      saveDocs(docs);
-      adminMessage.innerText = `Saved document for OTP ${otp}.`;
-      renderAdminList();
-      adminForm.reset();
-      adminPhotoData = "";
-      adminPhotoFile = null;
-      if (adminPhotoPreview) {
-        adminPhotoPreview.src = "";
-        adminPhotoPreview.style.display = "none";
-      }
-    })();
-  });
-  renderAdminList();
-
-  if (adminList) {
-    adminList.addEventListener("click", (event) => {
-      const target = event.target;
-      if (target.matches && target.matches(".admin-delete-button")) {
-        const otp = target.getAttribute("data-otp");
-        if (otp) {
-          deleteDoc(otp);
-        }
-      }
-    });
-  }
-}
-
-if (otpForm) {
-  otpForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const otp = document.getElementById("otp-code").value.trim();
-    const docs = loadDocs();
-    if (otp && docs[otp]) {
-      window.location.href = `doc.html?otp=${encodeURIComponent(otp)}`;
-    } else {
-      otpMessage.innerText = "OTP not found. Please check the number.";
-    }
-  });
-}
-
-if (docTitle && docClient && docBody) {
-  const params = new URLSearchParams(window.location.search);
-  const otp = params.get("otp");
-  const docs = loadDocs();
-  if (otp && docs[otp]) {
-    const doc = docs[otp];
-    docTitle.innerText = doc.title || "Client Document";
-    docClient.innerText = `Name: ${doc.name || "Unknown"}`;
-    if (docPhoto) {
-      if (doc.photo) {
-        docPhoto.src = doc.photo;
-        docPhoto.style.display = "block";
-      } else {
-        docPhoto.style.display = "none";
-      }
-    }
-    docBody.innerText =
-      doc.content || "Client document details are available here.";
-
-    if (receiptPreview && doc.receiptPhoto) {
-      receiptPreview.src = doc.receiptPhoto;
-      receiptPreview.style.display = "block";
-      if (receiptMessage)
-        receiptMessage.innerText =
-          "A receipt has already been submitted. You may upload a new one if needed.";
-    }
-
-    if (receiptPhotoInput) {
-      receiptPhotoInput.addEventListener("change", (event) => {
-        const file = event.target.files[0];
-        receiptPhotoFile = null;
-        if (file && file.type.startsWith("image/")) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            receiptPhotoData = reader.result;
-            receiptPhotoFile = file;
-            if (receiptPreview) {
-              receiptPreview.src = receiptPhotoData;
-              receiptPreview.style.display = "block";
-            }
-          };
-          reader.readAsDataURL(file);
-        } else {
-          receiptPhotoData = "";
-          if (receiptPreview) {
-            receiptPreview.style.display = "none";
-          }
-        }
-      });
-    }
-
-    if (receiptForm) {
-      receiptForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!receiptPhotoData && !receiptPhotoFile) {
-          if (receiptMessage)
-            receiptMessage.innerText =
-              "Please choose a receipt photo before submitting.";
-          return;
-        }
-
-        let receiptUrl = receiptPhotoData;
-        if (supabaseClient && receiptPhotoFile) {
-          try {
-            const ext = receiptPhotoFile.name.split(".").pop();
-            const remotePath = `receipts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-            const { error } = await supabaseClient.storage
-              .from(SUPABASE_BUCKET)
-              .upload(remotePath, receiptPhotoFile);
-            if (!error) {
-              const { publicUrl } = supabaseClient.storage
-                .from(SUPABASE_BUCKET)
-                .getPublicUrl(remotePath);
-              receiptUrl = publicUrl || receiptUrl;
-            } else {
-              console.warn("Supabase receipt upload failed", error);
-            }
-          } catch (err) {
-            console.error("Error uploading receipt", err);
-          }
-        }
-
-        const docs = loadDocs();
-        docs[otp] = {
-          ...doc,
-          receiptPhoto: receiptUrl,
-          receiptSubmittedAt: new Date().toISOString(),
-        };
-        saveDocs(docs);
-        if (receiptMessage)
-          receiptMessage.innerText = "Receipt submitted successfully.";
-        receiptPhotoData = "";
-        receiptPhotoFile = null;
-        if (receiptPreview) {
-          receiptPreview.src = "";
-          receiptPreview.style.display = "none";
-        }
-        if (receiptForm) {
-          receiptForm.reset();
-        }
-      });
-    }
   } else {
     docTitle.innerText = "Document Not Found";
     docClient.innerText = "Invalid or expired OTP.";
