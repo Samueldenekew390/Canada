@@ -1,0 +1,7 @@
+node_modules/
+config.js
+.env
+.DS_Store
+
+# Vercel build output (not strictly necessary but safe)
+.vercel/
