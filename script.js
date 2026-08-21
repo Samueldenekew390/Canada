@@ -527,7 +527,67 @@ async function renderDocumentFromQuery() {
     console.warn("[App] Error rendering document:", error);
   }
 }
+async function handleReceiptSubmit(event) {
+  event.preventDefault();
 
+  const messageEl = document.getElementById("receipt-message");
+  if (!requireSupabase(messageEl)) return;
+
+  const params = new URLSearchParams(location.search);
+  const otp = params.get("otp");
+
+  if (!otp) {
+    showMessage(messageEl, "❌ Missing OTP in the page URL.", true);
+    return;
+  }
+
+  const fileInput = document.getElementById("receipt-photo");
+  const file = fileInput?.files?.[0] || null;
+
+  if (!file) {
+    showMessage(messageEl, "Please choose a receipt photo first.", true);
+    return;
+  }
+
+  const submitBtn = event.target.querySelector('[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  showMessage(messageEl, "Uploading...", false);
+
+  try {
+    const receiptUrl = await uploadPhoto(file, `receipt-${otp}`);
+
+    if (!receiptUrl) {
+      throw new Error("Photo upload failed. Please try again.");
+    }
+
+    const { error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .update({
+        receipt_url: receiptUrl,
+        receipt_submitted_at: new Date().toISOString(),
+      })
+      .eq("otp", otp);
+
+    if (error) throw error;
+
+    showMessage(messageEl, "✅ Receipt submitted. Thank you!");
+    event.target.reset();
+    const preview = document.getElementById("receipt-preview");
+    if (preview) {
+      preview.src = "";
+      preview.style.display = "none";
+    }
+  } catch (error) {
+    console.error("[App] Receipt upload error:", error);
+    showMessage(
+      messageEl,
+      `❌ Error: ${error.message || "Could not submit receipt."}`,
+      true,
+    );
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -542,6 +602,7 @@ function init() {
   // Initialize photo previews
   initPhotoPreview("client-photo", "client-photo-preview");
   initPhotoPreview("admin-photo", "admin-photo-preview");
+  initPhotoPreview("receipt-photo", "receipt-preview");
 
   // Form handlers
   const registerForm = document.getElementById("client-register-form");
@@ -557,6 +618,11 @@ function init() {
   const otpForm = document.getElementById("otp-form");
   if (otpForm) {
     otpForm.addEventListener("submit", handleOtpLookup);
+  }
+
+  const receiptForm = document.getElementById("receipt-form");
+  if (receiptForm) {
+    receiptForm.addEventListener("submit", handleReceiptSubmit);
   }
 
   // Admin list handlers
