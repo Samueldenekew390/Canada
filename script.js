@@ -359,74 +359,62 @@ async function handleAdminDelete(event) {
   }
 }
 
-async function handleAdminSubmit(event) {
+async function handleReceiptSubmit(event) {
   event.preventDefault();
 
-  const messageEl = document.getElementById("admin-message");
+  const messageEl = document.getElementById("receipt-message");
   if (!requireSupabase(messageEl)) return;
 
-  const formData = {
-    otp: document.getElementById("admin-otp")?.value || "",
-    name: document.getElementById("admin-client-name")?.value || "",
-    title: document.getElementById("admin-doc-title")?.value || "",
-    content: document.getElementById("admin-doc-content")?.value || "",
-  };
+  const params = new URLSearchParams(location.search);
+  const otp = params.get("otp");
 
-  const requiredFields = ["otp", "name", "title", "content"];
-  const missingField = requiredFields.find((field) => !formData[field]);
+  if (!otp) {
+    showMessage(messageEl, "❌ Missing OTP in the page URL.", true);
+    return;
+  }
 
-  if (missingField) {
-    showMessage(
-      messageEl,
-      `Please fill all required fields. (Missing: ${missingField})`,
-      true,
-    );
+  const fileInput = document.getElementById("receipt-photo");
+  const file = fileInput?.files?.[0] || null;
+
+  if (!file) {
+    showMessage(messageEl, "Please choose a receipt photo first.", true);
     return;
   }
 
   const submitBtn = event.target.querySelector('[type="submit"]');
-  const photoInput = document.getElementById("admin-photo");
-  const photoFile = photoInput?.files?.[0] || null;
-
   if (submitBtn) submitBtn.disabled = true;
-  showMessage(messageEl, "Saving...", false);
+  showMessage(messageEl, "Uploading...", false);
 
   try {
-    const photoUrl = photoFile
-      ? await uploadPhoto(photoFile, `admin-${formData.otp}`)
-      : undefined;
+    const receiptUrl = await uploadPhoto(file, `receipt-${otp}`);
 
-    const payload = {
-      otp: formData.otp,
-      name: formData.name,
-      title: formData.title,
-      content: formData.content,
-      updated_at: new Date().toISOString(),
-    };
+    if (!receiptUrl) {
+      throw new Error("Photo upload failed. Please try again.");
+    }
 
-    if (photoUrl) payload.photo_url = photoUrl;
-
+    // ✅ FIXED: Only update the receipt_url field
     const { error } = await supabaseClient
       .from(CONFIG.TABLE_NAME)
-      .upsert(payload, { onConflict: "otp" });
+      .update({
+        receipt_url: receiptUrl,
+        // ❌ REMOVED: receipt_submitted_at - this column doesn't exist
+      })
+      .eq("otp", otp);
 
     if (error) throw error;
 
-    showMessage(messageEl, `✅ Saved document for OTP ${formData.otp}`);
-
+    showMessage(messageEl, "✅ Receipt submitted. Thank you!");
     event.target.reset();
-    const preview = document.getElementById("admin-photo-preview");
+    const preview = document.getElementById("receipt-preview");
     if (preview) {
       preview.src = "";
       preview.style.display = "none";
     }
-
-    await renderAdminList();
   } catch (error) {
-    console.error("[App] Admin save error:", error);
+    console.error("[App] Receipt upload error:", error);
     showMessage(
       messageEl,
-      `❌ Error: ${error.message || "Could not save."}`,
+      `❌ Error: ${error.message || "Could not submit receipt."}`,
       true,
     );
   } finally {
