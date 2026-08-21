@@ -1,298 +1,503 @@
-/*
-  Cleaned client script: modal, registration, simple localStorage docs, admin CRUD.
-*/
+// ============================================
+// CONFIGURATION
+// ============================================
+const CONFIG = {
+  SUPABASE_URL: "https://fzwhfooxwmosoucbynad.supabase.co",
+  SUPABASE_ANON_KEY:
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6d2hmb294d21vc291Y2J5bmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyMjA0NzUsImV4cCI6MjEwMjc5NjQ3NX0.0gL9k7ihJ5SIueVvpKWGuTE_P_6e9cm32uPpJWd5Jc8",
+  TABLE_NAME: "client_docs",
+  BUCKET_NAME: "client-photos",
+};
 
-const questions = document.querySelectorAll(".question");
-questions.forEach((q) =>
-  q.addEventListener("click", () => {
-    const plus = q.querySelector("span");
-    if (plus) plus.textContent = plus.textContent === "+" ? "-" : "+";
-  }),
-);
+// ============================================
+// SUPABASE INITIALIZATION
+// ============================================
+let supabaseClient = null;
 
-const STORAGE_KEY = "clientDocs";
-
-// Ensure critical listeners are attached after load (fixes race on some hosts)
-window.addEventListener("load", () => {
+function initSupabase() {
   try {
-    const btn = document.getElementById("register-toggle");
-    const modal = document.getElementById("register-modal");
-    const closeBtn = document.getElementById("register-close");
-    if (btn && modal && !btn._initAttached) {
-      btn.addEventListener("click", () => {
-        modal.style.display = "flex";
-        const first = document.getElementById("client-name");
-        if (first) first.focus();
-      });
-      if (closeBtn)
-        closeBtn.addEventListener(
-          "click",
-          () => (modal.style.display = "none"),
-        );
-      modal.addEventListener("click", (ev) => {
-        if (ev.target === modal) modal.style.display = "none";
-      });
-      btn._initAttached = true;
+    if (window.supabase && typeof window.supabase.createClient === "function") {
+      supabaseClient = window.supabase.createClient(
+        CONFIG.SUPABASE_URL,
+        CONFIG.SUPABASE_ANON_KEY,
+      );
+      console.log("[App] Supabase initialized successfully");
+    } else {
+      console.error(
+        "[App] Supabase library not found. " +
+          "Make sure the script is loaded before this file.",
+      );
     }
-  } catch (e) {
-    console.warn("Error attaching load listeners", e);
-  }
-});
-
-function loadDocs() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-  } catch {
-    return {};
+  } catch (error) {
+    console.error("[App] Failed to initialize Supabase:", error);
   }
 }
-function saveDocs(d) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+function requireSupabase(messageElement) {
+  if (supabaseClient) return true;
+
+  const message = "Supabase is not configured. Check console for details.";
+  if (messageElement) messageElement.innerText = message;
+  console.error("[App]", message);
+  return false;
 }
 
-// Register modal
-const registerToggle = document.getElementById("register-toggle");
-const registerModal = document.getElementById("register-modal");
-const registerClose = document.getElementById("register-close");
-const clientForm = document.getElementById("client-register-form");
-const clientPhotoInput = document.getElementById("client-photo");
-const clientPhotoPreview = document.getElementById("client-photo-preview");
-const registerMessage = document.getElementById("register-message");
-
-let clientPhotoData = "";
-
-if (registerToggle && registerModal) {
-  registerToggle.addEventListener("click", () => {
-    registerModal.style.display = "flex";
-    const first = document.getElementById("client-name");
-    if (first) first.focus();
-  });
+function showMessage(element, message, isError = false) {
+  if (!element) return;
+  element.innerText = message;
+  element.style.color = isError ? "#dc3545" : "#0057a8";
 }
-if (registerClose && registerModal)
-  registerClose.addEventListener(
-    "click",
-    () => (registerModal.style.display = "none"),
-  );
-if (registerModal)
-  registerModal.addEventListener("click", (ev) => {
-    if (ev.target === registerModal) registerModal.style.display = "none";
-  });
 
-if (clientPhotoInput) {
-  clientPhotoInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) {
-      clientPhotoData = "";
-      if (clientPhotoPreview) clientPhotoPreview.style.display = "none";
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      clientPhotoData = "";
-      if (clientPhotoPreview) clientPhotoPreview.style.display = "none";
-      return;
-    }
-    const r = new FileReader();
-    r.onload = () => {
-      clientPhotoData = r.result;
-      if (clientPhotoPreview) {
-        clientPhotoPreview.src = clientPhotoData;
-        clientPhotoPreview.style.display = "block";
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ============================================
+// FAQ ACCORDION
+// ============================================
+function initFaq() {
+  const questions = document.querySelectorAll(".question");
+  questions.forEach((question) => {
+    question.addEventListener("click", () => {
+      const plusIcon = question.querySelector("span");
+      if (plusIcon) {
+        plusIcon.textContent = plusIcon.textContent === "+" ? "−" : "+";
       }
-    };
-    r.readAsDataURL(file);
+    });
   });
 }
 
-if (clientForm) {
-  clientForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const name = (document.getElementById("client-name") || {}).value || "";
-    const age = (document.getElementById("client-age") || {}).value || "";
-    const gender = (document.getElementById("client-gender") || {}).value || "";
-    const email = (document.getElementById("client-email") || {}).value || "";
-    const phone = (document.getElementById("client-phone") || {}).value || "";
-    const dob = (document.getElementById("client-dob") || {}).value || "";
-    const place = (document.getElementById("client-place") || {}).value || "";
-    const country =
-      (document.getElementById("client-country") || {}).value || "";
-    const passport =
-      (document.getElementById("client-passport") || {}).value || "";
+// ============================================
+// MODAL CONTROLS
+// ============================================
+function initModal() {
+  const toggleBtn = document.getElementById("register-toggle");
+  const modal = document.getElementById("register-modal");
+  const closeBtn = document.getElementById("register-close");
 
-    if (
-      !name ||
-      !age ||
-      !gender ||
-      !email ||
-      !phone ||
-      !dob ||
-      !place ||
-      !country ||
-      !passport
-    ) {
-      if (registerMessage)
-        registerMessage.innerText = "Please fill all required fields.";
-      return;
-    }
+  if (toggleBtn && modal) {
+    toggleBtn.addEventListener("click", () => {
+      modal.style.display = "flex";
+      const firstInput = document.getElementById("client-name");
+      if (firstInput) firstInput.focus();
+    });
+  }
 
-    const docs = loadDocs();
-    let otp;
-    do {
-      otp = Math.floor(100000 + Math.random() * 900000).toString();
-    } while (docs[otp]);
+  if (closeBtn && modal) {
+    closeBtn.addEventListener("click", () => {
+      modal.style.display = "none";
+    });
+  }
 
-    docs[otp] = {
-      name,
-      age,
-      gender,
-      email,
-      phone,
-      dob,
-      place,
-      country,
-      passport,
-      photo: clientPhotoData || "",
-      submittedAt: new Date().toISOString(),
-    };
-
-    saveDocs(docs);
-    if (registerMessage)
-      registerMessage.innerText = `Submitted. OTP: ${otp} — saved.`;
-    if (registerModal) registerModal.style.display = "none";
-    clientForm.reset();
-    if (clientPhotoPreview) {
-      clientPhotoPreview.src = "";
-      clientPhotoPreview.style.display = "none";
-    }
-    setTimeout(() => {
-      window.location.href = "index.html";
-    }, 700);
-  });
-}
-
-// Admin document manager (simple localStorage)
-const adminForm = document.getElementById("admin-doc-form");
-const adminMessage = document.getElementById("admin-message");
-const adminList = document.getElementById("admin-list");
-const adminPhotoInput = document.getElementById("admin-photo");
-const adminPhotoPreview = document.getElementById("admin-photo-preview");
-let adminPhotoData = "";
-
-if (adminPhotoInput) {
-  adminPhotoInput.addEventListener("change", (e) => {
-    const f = e.target.files[0];
-    if (!f || !f.type.startsWith("image/")) {
-      adminPhotoData = "";
-      if (adminPhotoPreview) adminPhotoPreview.style.display = "none";
-      return;
-    }
-    const r = new FileReader();
-    r.onload = () => {
-      adminPhotoData = r.result;
-      if (adminPhotoPreview) {
-        adminPhotoPreview.src = adminPhotoData;
-        adminPhotoPreview.style.display = "block";
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.style.display = "none";
       }
-    };
-    r.readAsDataURL(f);
-  });
+    });
+  }
 }
 
-function renderAdminList() {
-  if (!adminList) return;
-  const docs = loadDocs();
-  const keys = Object.keys(docs);
-  if (!keys.length) {
-    adminList.innerHTML = "<p>No client docs saved yet.</p>";
+// ============================================
+// PHOTO PREVIEW
+// ============================================
+function initPhotoPreview(inputId, previewId) {
+  const input = document.getElementById(inputId);
+  const preview = document.getElementById(previewId);
+
+  if (!input || !preview) return null;
+
+  input.addEventListener("change", (event) => {
+    const file = event.target.files[0];
+
+    if (!file || !file.type.startsWith("image/")) {
+      preview.style.display = "none";
+      preview.src = "";
+      return null;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      preview.src = reader.result;
+      preview.style.display = "block";
+    };
+    reader.readAsDataURL(file);
+
+    return file;
+  });
+
+  return input;
+}
+
+// ============================================
+// SUPABASE HELPERS
+// ============================================
+async function uploadPhoto(file, keyHint) {
+  if (!file || !supabaseClient) return "";
+
+  const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${keyHint}-${Date.now()}.${extension}`;
+
+  const { error: uploadError } = await supabaseClient.storage
+    .from(CONFIG.BUCKET_NAME)
+    .upload(path, file, { cacheControl: "3600", upsert: false });
+
+  if (uploadError) {
+    console.warn("[App] Photo upload failed:", uploadError);
+    return "";
+  }
+
+  const { data } = supabaseClient.storage
+    .from(CONFIG.BUCKET_NAME)
+    .getPublicUrl(path);
+
+  return data?.publicUrl || "";
+}
+
+async function generateUniqueOtp() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const { data, error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .select("otp")
+      .eq("otp", otp)
+      .maybeSingle();
+
+    if (!error && !data) return otp;
+  }
+
+  throw new Error("Could not generate a unique OTP. Please try again.");
+}
+
+// ============================================
+// CLIENT REGISTRATION
+// ============================================
+async function handleClientRegistration(event) {
+  event.preventDefault();
+
+  const messageEl = document.getElementById("register-message");
+  if (!requireSupabase(messageEl)) return;
+
+  // Get form values
+  const formData = {
+    name: document.getElementById("client-name")?.value || "",
+    age: document.getElementById("client-age")?.value || "",
+    gender: document.getElementById("client-gender")?.value || "",
+    email: document.getElementById("client-email")?.value || "",
+    phone: document.getElementById("client-phone")?.value || "",
+    dob: document.getElementById("client-dob")?.value || "",
+    place: document.getElementById("client-place")?.value || "",
+    country: document.getElementById("client-country")?.value || "",
+    passport: document.getElementById("client-passport")?.value || "",
+  };
+
+  // Validate required fields
+  const requiredFields = [
+    "name",
+    "age",
+    "gender",
+    "email",
+    "phone",
+    "dob",
+    "place",
+    "country",
+    "passport",
+  ];
+  const missingField = requiredFields.find((field) => !formData[field]);
+
+  if (missingField) {
+    showMessage(
+      messageEl,
+      `Please fill all required fields. (Missing: ${missingField})`,
+      true,
+    );
     return;
   }
-  adminList.innerHTML = keys
-    .map((otp) => {
-      const d = docs[otp];
-      return `<div class="admin-item"><div><strong>OTP:</strong> ${otp}</div><div><p><strong>Name:</strong> ${d.name}</p><p>${d.content || ""}</p>${d.photo ? `<img src="${d.photo}" style="max-width:160px"/>` : ""}<p><button class="admin-delete-button" data-otp="${otp}">Delete</button></p></div></div>`;
-    })
-    .join("");
-}
 
-if (adminList) {
-  adminList.addEventListener("click", (e) => {
-    const t = e.target;
-    if (t.matches && t.matches(".admin-delete-button")) {
-      const otp = t.getAttribute("data-otp");
-      if (!otp) return;
-      const docs = loadDocs();
-      delete docs[otp];
-      saveDocs(docs);
-      renderAdminList();
+  const submitBtn = event.target.querySelector('[type="submit"]');
+  const photoInput = document.getElementById("client-photo");
+  const photoFile = photoInput?.files?.[0] || null;
+
+  if (submitBtn) submitBtn.disabled = true;
+  showMessage(messageEl, "Submitting...", false);
+
+  try {
+    const otp = await generateUniqueOtp();
+    const photoUrl = photoFile ? await uploadPhoto(photoFile, otp) : "";
+
+    const { error } = await supabaseClient.from(CONFIG.TABLE_NAME).insert({
+      otp,
+      ...formData,
+      photo_url: photoUrl,
+      submitted_at: new Date().toISOString(),
+    });
+
+    if (error) throw error;
+
+    showMessage(messageEl, `✅ Submitted successfully! Your OTP: ${otp}`);
+
+    // Reset form
+    event.target.reset();
+    const preview = document.getElementById("client-photo-preview");
+    if (preview) {
+      preview.src = "";
+      preview.style.display = "none";
     }
-  });
+
+    // Close modal and redirect
+    const modal = document.getElementById("register-modal");
+    if (modal) modal.style.display = "none";
+
+    await sleep(700);
+    window.location.href = "index.html";
+  } catch (error) {
+    console.error("[App] Registration error:", error);
+    showMessage(
+      messageEl,
+      `❌ Error: ${error.message || "Could not save."}`,
+      true,
+    );
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
-if (adminForm) {
-  adminForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const otp = (document.getElementById("admin-otp") || {}).value || "";
-    const name =
-      (document.getElementById("admin-client-name") || {}).value || "";
-    const title =
-      (document.getElementById("admin-doc-title") || {}).value || "";
-    const content =
-      (document.getElementById("admin-doc-content") || {}).value || "";
+// ============================================
+// ADMIN FUNCTIONS
+// ============================================
+async function renderAdminList() {
+  const listEl = document.getElementById("admin-list");
+  if (!listEl) return;
 
-    if (!otp || !name || !title || !content) {
-      if (adminMessage)
-        adminMessage.innerText = "Please fill all required fields.";
+  if (!supabaseClient) {
+    listEl.innerHTML = "<p>⚠️ Supabase is not configured.</p>";
+    return;
+  }
+
+  listEl.innerHTML = "<p>Loading...</p>";
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .select("*")
+      .order("submitted_at", { ascending: false });
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      listEl.innerHTML = "<p>No client documents found.</p>";
       return;
     }
 
-    const docs = loadDocs();
-    docs[otp] = {
-      name,
-      title,
-      content,
-      photo: adminPhotoData || "",
-      updatedAt: new Date().toISOString(),
+    // Show every field that exists on the record, not just OTP/name/photo.
+    const field = (label, value) => {
+      if (value === undefined || value === null || value === "") return "";
+      return `<p><strong>${label}:</strong> ${value}</p>`;
     };
-    saveDocs(docs);
-    if (adminMessage) adminMessage.innerText = `Saved document for OTP ${otp}.`;
-    adminForm.reset();
-    adminPhotoData = "";
-    if (adminPhotoPreview) {
-      adminPhotoPreview.src = "";
-      adminPhotoPreview.style.display = "none";
-    }
-    renderAdminList();
-  });
+
+    listEl.innerHTML = data
+      .map(
+        (item) => `
+            <div class="admin-item">
+                <div><strong>OTP:</strong> ${item.otp}</div>
+                <div>
+                    ${field("Name", item.name)}
+                    ${field("Title", item.title)}
+                    ${field("Age", item.age)}
+                    ${field("Gender", item.gender)}
+                    ${field("Email", item.email)}
+                    ${field("Phone", item.phone)}
+                    ${field("Date of Birth", item.dob)}
+                    ${field("Place", item.place)}
+                    ${field("Country", item.country)}
+                    ${field("Passport", item.passport)}
+                    ${item.content ? `<p><strong>Content:</strong><br>${item.content.replace(/\n/g, "<br>")}</p>` : ""}
+                    ${field("Submitted", item.submitted_at)}
+                    ${field("Updated", item.updated_at)}
+                    ${item.photo_url ? `<img src="${item.photo_url}" style="max-width:160px" alt="Client photo" />` : ""}
+                    <p><button class="admin-delete-button" data-otp="${item.otp}">Delete</button></p>
+                </div>
+            </div>
+        `,
+      )
+      .join("");
+  } catch (error) {
+    console.error("[App] Error loading admin list:", error);
+    listEl.innerHTML = `<p>❌ Error loading documents: ${error.message}</p>`;
+  }
 }
 
-// OTP lookup form on otp.html -> redirect to doc.html with query param
-const otpForm = document.getElementById("otp-form");
-const otpMessage = document.getElementById("otp-message");
-if (otpForm) {
-  otpForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const code = (document.getElementById("otp-code") || {}).value || "";
-    const docs = loadDocs();
-    if (docs[code]) {
+async function handleAdminDelete(event) {
+  const target = event.target;
+  if (!target.matches?.(".admin-delete-button")) return;
+
+  const otp = target.getAttribute("data-otp");
+  if (!otp || !supabaseClient) return;
+
+  if (!confirm(`Are you sure you want to delete document with OTP: ${otp}?`))
+    return;
+
+  target.disabled = true;
+
+  try {
+    const { error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .delete()
+      .eq("otp", otp);
+
+    if (error) throw error;
+
+    await renderAdminList();
+  } catch (error) {
+    console.error("[App] Delete error:", error);
+    alert(`Could not delete: ${error.message}`);
+    target.disabled = false;
+  }
+}
+
+async function handleAdminSubmit(event) {
+  event.preventDefault();
+
+  const messageEl = document.getElementById("admin-message");
+  if (!requireSupabase(messageEl)) return;
+
+  const formData = {
+    otp: document.getElementById("admin-otp")?.value || "",
+    name: document.getElementById("admin-client-name")?.value || "",
+    title: document.getElementById("admin-doc-title")?.value || "",
+    content: document.getElementById("admin-doc-content")?.value || "",
+  };
+
+  const requiredFields = ["otp", "name", "title", "content"];
+  const missingField = requiredFields.find((field) => !formData[field]);
+
+  if (missingField) {
+    showMessage(
+      messageEl,
+      `Please fill all required fields. (Missing: ${missingField})`,
+      true,
+    );
+    return;
+  }
+
+  const submitBtn = event.target.querySelector('[type="submit"]');
+  const photoInput = document.getElementById("admin-photo");
+  const photoFile = photoInput?.files?.[0] || null;
+
+  if (submitBtn) submitBtn.disabled = true;
+  showMessage(messageEl, "Saving...", false);
+
+  try {
+    const photoUrl = photoFile
+      ? await uploadPhoto(photoFile, `admin-${formData.otp}`)
+      : undefined;
+
+    const payload = {
+      otp: formData.otp,
+      name: formData.name,
+      title: formData.title,
+      content: formData.content,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (photoUrl) payload.photo_url = photoUrl;
+
+    const { error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .upsert(payload, { onConflict: "otp" });
+
+    if (error) throw error;
+
+    showMessage(messageEl, `✅ Saved document for OTP ${formData.otp}`);
+
+    event.target.reset();
+    const preview = document.getElementById("admin-photo-preview");
+    if (preview) {
+      preview.src = "";
+      preview.style.display = "none";
+    }
+
+    await renderAdminList();
+  } catch (error) {
+    console.error("[App] Admin save error:", error);
+    showMessage(
+      messageEl,
+      `❌ Error: ${error.message || "Could not save."}`,
+      true,
+    );
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+// ============================================
+// OTP LOOKUP
+// ============================================
+async function handleOtpLookup(event) {
+  event.preventDefault();
+
+  const messageEl = document.getElementById("otp-message");
+  if (!requireSupabase(messageEl)) return;
+
+  const code = document.getElementById("otp-code")?.value || "";
+  if (!code) {
+    showMessage(messageEl, "Please enter an OTP code.", true);
+    return;
+  }
+
+  showMessage(messageEl, "Checking...", false);
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .select("otp")
+      .eq("otp", code)
+      .maybeSingle();
+
+    if (!error && data) {
       window.location.href = `doc.html?otp=${encodeURIComponent(code)}`;
     } else {
-      if (otpMessage) otpMessage.innerText = "Invalid or expired OTP.";
+      showMessage(messageEl, "❌ Invalid or expired OTP.", true);
     }
-  });
+  } catch (error) {
+    console.error("[App] OTP lookup error:", error);
+    showMessage(messageEl, "❌ An error occurred. Please try again.", true);
+  }
 }
 
-// Render document on doc.html when ?otp=... is present
-function renderDocFromQuery() {
+// ============================================
+// DOCUMENT RENDER
+// ============================================
+async function renderDocumentFromQuery() {
   try {
     const params = new URLSearchParams(location.search);
     const code = params.get("otp");
+
+    if (!code) return;
+
     const docTitle = document.getElementById("doc-title");
     const docClient = document.getElementById("doc-client");
     const docPhoto = document.getElementById("doc-photo");
     const docBody = document.getElementById("doc-body");
-    if (!code) return;
-    const docs = loadDocs();
-    const d = docs[code];
-    if (!d) {
+
+    if (!supabaseClient) {
+      if (docTitle) docTitle.innerText = "Configuration Error";
+      if (docClient) docClient.innerText = "Supabase is not configured.";
+      if (docPhoto) docPhoto.style.display = "none";
+      return;
+    }
+
+    const { data, error } = await supabaseClient
+      .from(CONFIG.TABLE_NAME)
+      .select("*")
+      .eq("otp", code)
+      .maybeSingle();
+
+    if (error || !data) {
       if (docTitle) docTitle.innerText = "Document Not Found";
       if (docClient) docClient.innerText = "Invalid or expired OTP.";
       if (docPhoto) docPhoto.style.display = "none";
@@ -300,26 +505,76 @@ function renderDocFromQuery() {
       return;
     }
 
-    if (docTitle) docTitle.innerText = d.title || "Client Document";
-    if (docClient)
-      docClient.innerText = d.name
-        ? `${d.name} — Submitted ${d.submittedAt || d.updatedAt || ""}`
-        : "";
-    if (docBody)
-      docBody.innerText =
-        d.content ||
-        `Passport: ${d.passport || ""}\nAge: ${d.age || ""}\nPhone: ${d.phone || ""}`;
-    if (docPhoto) {
-      if (d.photo) {
-        docPhoto.src = d.photo;
-        docPhoto.style.display = "block";
-      } else docPhoto.style.display = "none";
+    if (docTitle) docTitle.innerText = data.title || "Client Document";
+    if (docClient) {
+      const date = data.submitted_at || data.updated_at || "";
+      docClient.innerText = data.name ? `${data.name} — Submitted ${date}` : "";
     }
-  } catch (e) {
-    console.warn("Error rendering document", e);
+    if (docBody) {
+      docBody.innerText =
+        data.content ||
+        `Passport: ${data.passport || ""}\nAge: ${data.age || ""}\nPhone: ${data.phone || ""}`;
+    }
+    if (docPhoto) {
+      if (data.photo_url) {
+        docPhoto.src = data.photo_url;
+        docPhoto.style.display = "block";
+      } else {
+        docPhoto.style.display = "none";
+      }
+    }
+  } catch (error) {
+    console.warn("[App] Error rendering document:", error);
   }
 }
 
-window.addEventListener("load", () => {
-  renderDocFromQuery();
-});
+// ============================================
+// INITIALIZATION
+// ============================================
+function init() {
+  // Initialize Supabase
+  initSupabase();
+
+  // Initialize UI components
+  initFaq();
+  initModal();
+
+  // Initialize photo previews
+  initPhotoPreview("client-photo", "client-photo-preview");
+  initPhotoPreview("admin-photo", "admin-photo-preview");
+
+  // Form handlers
+  const registerForm = document.getElementById("client-register-form");
+  if (registerForm) {
+    registerForm.addEventListener("submit", handleClientRegistration);
+  }
+
+  const adminForm = document.getElementById("admin-doc-form");
+  if (adminForm) {
+    adminForm.addEventListener("submit", handleAdminSubmit);
+  }
+
+  const otpForm = document.getElementById("otp-form");
+  if (otpForm) {
+    otpForm.addEventListener("submit", handleOtpLookup);
+  }
+
+  // Admin list handlers
+  const adminList = document.getElementById("admin-list");
+  if (adminList) {
+    adminList.addEventListener("click", handleAdminDelete);
+  }
+
+  // Render content on page load
+  renderDocumentFromQuery();
+  renderAdminList();
+
+  console.log("[App] Application initialized successfully");
+}
+
+// Start the application when DOM is ready
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
