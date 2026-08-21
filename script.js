@@ -359,62 +359,74 @@ async function handleAdminDelete(event) {
   }
 }
 
-async function handleReceiptSubmit(event) {
+async function handleAdminSubmit(event) {
   event.preventDefault();
 
-  const messageEl = document.getElementById("receipt-message");
+  const messageEl = document.getElementById("admin-message");
   if (!requireSupabase(messageEl)) return;
 
-  const params = new URLSearchParams(location.search);
-  const otp = params.get("otp");
+  const formData = {
+    otp: document.getElementById("admin-otp")?.value || "",
+    name: document.getElementById("admin-client-name")?.value || "",
+    title: document.getElementById("admin-doc-title")?.value || "",
+    content: document.getElementById("admin-doc-content")?.value || "",
+  };
 
-  if (!otp) {
-    showMessage(messageEl, "❌ Missing OTP in the page URL.", true);
-    return;
-  }
+  const requiredFields = ["otp", "name", "title", "content"];
+  const missingField = requiredFields.find((field) => !formData[field]);
 
-  const fileInput = document.getElementById("receipt-photo");
-  const file = fileInput?.files?.[0] || null;
-
-  if (!file) {
-    showMessage(messageEl, "Please choose a receipt photo first.", true);
+  if (missingField) {
+    showMessage(
+      messageEl,
+      `Please fill all required fields. (Missing: ${missingField})`,
+      true,
+    );
     return;
   }
 
   const submitBtn = event.target.querySelector('[type="submit"]');
+  const photoInput = document.getElementById("admin-photo");
+  const photoFile = photoInput?.files?.[0] || null;
+
   if (submitBtn) submitBtn.disabled = true;
-  showMessage(messageEl, "Uploading...", false);
+  showMessage(messageEl, "Saving...", false);
 
   try {
-    const receiptUrl = await uploadPhoto(file, `receipt-${otp}`);
+    const photoUrl = photoFile
+      ? await uploadPhoto(photoFile, `admin-${formData.otp}`)
+      : undefined;
 
-    if (!receiptUrl) {
-      throw new Error("Photo upload failed. Please try again.");
-    }
+    const payload = {
+      otp: formData.otp,
+      name: formData.name,
+      title: formData.title,
+      content: formData.content,
+      updated_at: new Date().toISOString(),
+    };
 
-    // ✅ FIXED: Only update the receipt_url field
+    if (photoUrl) payload.photo_url = photoUrl;
+
     const { error } = await supabaseClient
       .from(CONFIG.TABLE_NAME)
-      .update({
-        receipt_url: receiptUrl,
-        // ❌ REMOVED: receipt_submitted_at - this column doesn't exist
-      })
-      .eq("otp", otp);
+      .upsert(payload, { onConflict: "otp" });
 
     if (error) throw error;
 
-    showMessage(messageEl, "✅ Receipt submitted. Thank you!");
+    showMessage(messageEl, `✅ Saved document for OTP ${formData.otp}`);
+
     event.target.reset();
-    const preview = document.getElementById("receipt-preview");
+    const preview = document.getElementById("admin-photo-preview");
     if (preview) {
       preview.src = "";
       preview.style.display = "none";
     }
+
+    await renderAdminList();
   } catch (error) {
-    console.error("[App] Receipt upload error:", error);
+    console.error("[App] Admin save error:", error);
     showMessage(
       messageEl,
-      `❌ Error: ${error.message || "Could not submit receipt."}`,
+      `❌ Error: ${error.message || "Could not save."}`,
       true,
     );
   } finally {
@@ -515,6 +527,10 @@ async function renderDocumentFromQuery() {
     console.warn("[App] Error rendering document:", error);
   }
 }
+
+// ============================================
+// ✅ FIXED RECEIPT SUBMIT FUNCTION
+// ============================================
 async function handleReceiptSubmit(event) {
   event.preventDefault();
 
@@ -548,11 +564,12 @@ async function handleReceiptSubmit(event) {
       throw new Error("Photo upload failed. Please try again.");
     }
 
+    // ✅ FIXED: Only update receipt_url - removed receipt_submitted_at
     const { error } = await supabaseClient
       .from(CONFIG.TABLE_NAME)
       .update({
         receipt_url: receiptUrl,
-        receipt_submitted_at: new Date().toISOString(),
+        // ✅ receipt_submitted_at removed - this column doesn't exist in your table
       })
       .eq("otp", otp);
 
@@ -576,6 +593,7 @@ async function handleReceiptSubmit(event) {
     if (submitBtn) submitBtn.disabled = false;
   }
 }
+
 // ============================================
 // INITIALIZATION
 // ============================================
