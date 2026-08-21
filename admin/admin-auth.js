@@ -2,12 +2,15 @@
   const authCard = document.getElementById("admin-auth-card");
   const adminDashboard = document.getElementById("admin-dashboard");
   const authMessage = document.getElementById("admin-auth-message");
-  const changePasswordForm = document.getElementById("admin-change-password-form");
+  const changePasswordForm = document.getElementById(
+    "admin-change-password-form",
+  );
   const logoutButton = document.getElementById("admin-logout-button");
   const authGate = document.createElement("div");
 
   const PASSWORD_STORAGE_KEY = "adminPasswordHash";
   const AUTH_SESSION_KEY = "adminAuthSession";
+  const DEFAULT_PASSWORD = "zelalem@0";
 
   authGate.className = "auth-shell";
 
@@ -36,8 +39,13 @@
     return String(hash);
   }
 
-  function hasPassword() {
-    return Boolean(localStorage.getItem(PASSWORD_STORAGE_KEY));
+  // Returns the currently active password hash: whatever was set via
+  // "Change Password", or the built-in default if nothing was ever set.
+  function getActiveHash() {
+    return (
+      localStorage.getItem(PASSWORD_STORAGE_KEY) ||
+      hashPassword(DEFAULT_PASSWORD)
+    );
   }
 
   function isAuthenticated() {
@@ -69,17 +77,14 @@
 
     setDashboardVisible(false);
 
-    const needsSetup = !hasPassword();
     const form = document.createElement("form");
     form.className = "auth-card auth-form";
     form.innerHTML = `
-      <h1>${needsSetup ? "Create Admin Password" : "Admin Login"}</h1>
-      <p>${needsSetup ? "Create the first admin password to access the dashboard." : "Enter the admin password to access the dashboard."}</p>
+      <h1>Admin Login</h1>
+      <p>Enter the admin password to access the dashboard.</p>
       <label for="admin-login-password">Password</label>
       <input id="admin-login-password" type="password" placeholder="Enter password" required />
-      <label for="admin-confirm-password">Confirm password</label>
-      <input id="admin-confirm-password" type="password" placeholder="Confirm password" />
-      <button type="submit">${needsSetup ? "Create Password" : "Login"}</button>
+      <button type="submit">Login</button>
       <div id="admin-login-message" class="auth-message"></div>
     `;
 
@@ -90,9 +95,7 @@
       event.preventDefault();
       const messageBox = document.getElementById("admin-login-message");
       const passwordInput = document.getElementById("admin-login-password");
-      const confirmInput = document.getElementById("admin-confirm-password");
       const password = passwordInput ? passwordInput.value : "";
-      const confirmPassword = confirmInput ? confirmInput.value : "";
 
       if (!password.trim()) {
         if (messageBox) {
@@ -102,32 +105,7 @@
         return;
       }
 
-      if (needsSetup) {
-        const weakPasswordMessage = validatePassword(password);
-        if (weakPasswordMessage) {
-          if (messageBox) {
-            messageBox.textContent = weakPasswordMessage;
-            messageBox.className = "auth-message error";
-          }
-          return;
-        }
-        if (password !== confirmPassword) {
-          if (messageBox) {
-            messageBox.textContent = "Passwords do not match.";
-            messageBox.className = "auth-message error";
-          }
-          return;
-        }
-
-        localStorage.setItem(PASSWORD_STORAGE_KEY, hashPassword(password));
-        sessionStorage.setItem(AUTH_SESSION_KEY, "true");
-        showMessage("Password created successfully. You are now logged in.");
-        renderAuthGate();
-        return;
-      }
-
-      const storedHash = localStorage.getItem(PASSWORD_STORAGE_KEY);
-      if (hashPassword(password) === storedHash) {
+      if (hashPassword(password) === getActiveHash()) {
         sessionStorage.setItem(AUTH_SESSION_KEY, "true");
         showMessage("Login successful.");
         renderAuthGate();
@@ -147,22 +125,20 @@
   if (changePasswordForm) {
     changePasswordForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      const currentPassword = document.getElementById("admin-current-password").value;
+      const currentPassword = document.getElementById(
+        "admin-current-password",
+      ).value;
       const newPassword = document.getElementById("admin-new-password").value;
-      const confirmPassword = document.getElementById("admin-new-password-confirm").value;
+      const confirmPassword = document.getElementById(
+        "admin-new-password-confirm",
+      ).value;
 
       if (!currentPassword || !newPassword || !confirmPassword) {
         showMessage("Please fill in all password fields.", true);
         return;
       }
 
-      const storedHash = localStorage.getItem(PASSWORD_STORAGE_KEY);
-      if (!storedHash) {
-        showMessage("Create a password first before changing it.", true);
-        return;
-      }
-
-      if (hashPassword(currentPassword) !== storedHash) {
+      if (hashPassword(currentPassword) !== getActiveHash()) {
         showMessage("Current password is incorrect.", true);
         return;
       }
@@ -193,11 +169,7 @@
   }
 
   window.addEventListener("load", () => {
-    if (!hasPassword()) {
-      showMessage("Create an admin password to access the dashboard.");
-    } else {
-      showMessage("Enter the admin password to access the dashboard.");
-    }
+    showMessage("Enter the admin password to access the dashboard.");
     renderAuthGate();
   });
 })();
