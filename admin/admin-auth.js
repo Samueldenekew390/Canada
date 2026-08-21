@@ -8,10 +8,6 @@
   const logoutButton = document.getElementById("admin-logout-button");
   const authGate = document.createElement("div");
 
-  const PASSWORD_STORAGE_KEY = "adminPasswordHash";
-  const AUTH_SESSION_KEY = "adminAuthSession";
-  const DEFAULT_PASSWORD = "zelalem@0";
-
   authGate.className = "auth-shell";
 
   function showMessage(message, isError = false) {
@@ -20,58 +16,46 @@
     authMessage.className = `auth-message${isError ? " error" : ""}`;
   }
 
-  function validatePassword(password) {
-    if (!password || password.trim().length < 6) {
-      return "Password must be at least 6 characters long.";
-    }
-    if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
-      return "Password must include at least one uppercase letter and one number.";
-    }
-    return "";
-  }
-
-  function hashPassword(password) {
-    let hash = 0;
-    for (let i = 0; i < password.length; i += 1) {
-      hash = (hash << 5) - hash + password.charCodeAt(i);
-      hash |= 0;
-    }
-    return String(hash);
-  }
-
-  // Returns the currently active password hash: whatever was set via
-  // "Change Password", or the built-in default if nothing was ever set.
-  function getActiveHash() {
-    return (
-      localStorage.getItem(PASSWORD_STORAGE_KEY) ||
-      hashPassword(DEFAULT_PASSWORD)
-    );
-  }
-
-  function isAuthenticated() {
-    return sessionStorage.getItem(AUTH_SESSION_KEY) === "true";
-  }
-
   function setDashboardVisible(isVisible) {
-    if (adminDashboard) {
+    if (adminDashboard)
       adminDashboard.style.display = isVisible ? "block" : "none";
-    }
-    if (changePasswordForm) {
+    if (changePasswordForm)
       changePasswordForm.style.display = isVisible ? "grid" : "none";
-    }
-    if (logoutButton) {
+    if (logoutButton)
       logoutButton.style.display = isVisible ? "inline-block" : "none";
-    }
   }
 
-  function renderAuthGate() {
+  // script.js (loaded before this file) creates a top-level `supabaseClient`.
+  // Classic <script> tags share the same global scope, so we can read it
+  // directly here as long as script.js's init() has already run.
+  function getClient() {
+    if (typeof supabaseClient !== "undefined" && supabaseClient)
+      return supabaseClient;
+    return null;
+  }
+
+  async function renderAuthGate() {
     if (authGate.parentNode) {
       authGate.parentNode.removeChild(authGate);
     }
 
-    if (isAuthenticated()) {
+    const client = getClient();
+    if (!client) {
+      showMessage(
+        "Supabase is not configured — check the browser console.",
+        true,
+      );
+      setDashboardVisible(false);
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await client.auth.getSession();
+
+    if (session) {
       setDashboardVisible(true);
-      showMessage("You are logged in as admin.");
+      showMessage(`Logged in as ${session.user.email}`);
       return;
     }
 
@@ -81,7 +65,9 @@
     form.className = "auth-card auth-form";
     form.innerHTML = `
       <h1>Admin Login</h1>
-      <p>Enter the admin password to access the dashboard.</p>
+      <p>Enter your admin email and password.</p>
+      <label for="admin-login-email">Email</label>
+      <input id="admin-login-email" type="email" placeholder="Enter email" required />
       <label for="admin-login-password">Password</label>
       <input id="admin-login-password" type="password" placeholder="Enter password" required />
       <button type="submit">Login</button>
@@ -91,30 +77,43 @@
     authGate.innerHTML = "";
     authGate.appendChild(form);
 
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const messageBox = document.getElementById("admin-login-message");
-      const passwordInput = document.getElementById("admin-login-password");
-      const password = passwordInput ? passwordInput.value : "";
+      const email = document.getElementById("admin-login-email")?.value || "";
+      const password =
+        document.getElementById("admin-login-password")?.value || "";
 
-      if (!password.trim()) {
+      if (!email || !password) {
         if (messageBox) {
-          messageBox.textContent = "Please enter a password.";
+          messageBox.textContent = "Please enter email and password.";
           messageBox.className = "auth-message error";
         }
         return;
       }
 
-      if (hashPassword(password) === getActiveHash()) {
-        sessionStorage.setItem(AUTH_SESSION_KEY, "true");
-        showMessage("Login successful.");
-        renderAuthGate();
-      } else {
+      const submitBtn = form.querySelector('[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      if (messageBox) {
+        messageBox.textContent = "Logging in...";
+        messageBox.className = "auth-message";
+      }
+
+      const { error } = await client.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
         if (messageBox) {
-          messageBox.textContent = "Incorrect password.";
+          messageBox.textContent = error.message || "Login failed.";
           messageBox.className = "auth-message error";
         }
+        if (submitBtn) submitBtn.disabled = false;
+        return;
       }
+
+      await renderAuthGate();
     });
 
     if (authCard) {
@@ -123,53 +122,79 @@
   }
 
   if (changePasswordForm) {
-    changePasswordForm.addEventListener("submit", (event) => {
+    changePasswordForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const currentPassword = document.getElementById(
-        "admin-current-password",
-      ).value;
-      const newPassword = document.getElementById("admin-new-password").value;
-      const confirmPassword = document.getElementById(
-        "admin-new-password-confirm",
-      ).value;
+      const client = getClient();
+      if (!client) {
+        showMessage("Supabase is not configured.", true);
+        return;
+      }
+
+      const currentPassword =
+        document.getElementById("admin-current-password")?.value || "";
+      const newPassword =
+        document.getElementById("admin-new-password")?.value || "";
+      const confirmPassword =
+        document.getElementById("admin-new-password-confirm")?.value || "";
 
       if (!currentPassword || !newPassword || !confirmPassword) {
         showMessage("Please fill in all password fields.", true);
         return;
       }
-
-      if (hashPassword(currentPassword) !== getActiveHash()) {
-        showMessage("Current password is incorrect.", true);
-        return;
-      }
-
-      const weakPasswordMessage = validatePassword(newPassword);
-      if (weakPasswordMessage) {
-        showMessage(weakPasswordMessage, true);
-        return;
-      }
-
       if (newPassword !== confirmPassword) {
         showMessage("New passwords do not match.", true);
         return;
       }
 
-      localStorage.setItem(PASSWORD_STORAGE_KEY, hashPassword(newPassword));
+      const {
+        data: { session },
+      } = await client.auth.getSession();
+      if (!session) {
+        showMessage("You must be logged in to change your password.", true);
+        return;
+      }
+
+      // Re-verify the current password before allowing a change.
+      const { error: verifyError } = await client.auth.signInWithPassword({
+        email: session.user.email,
+        password: currentPassword,
+      });
+      if (verifyError) {
+        showMessage("Current password is incorrect.", true);
+        return;
+      }
+
+      const { error: updateError } = await client.auth.updateUser({
+        password: newPassword,
+      });
+      if (updateError) {
+        showMessage(updateError.message || "Could not update password.", true);
+        return;
+      }
+
       changePasswordForm.reset();
       showMessage("Password changed successfully.");
     });
   }
 
   if (logoutButton) {
-    logoutButton.addEventListener("click", () => {
-      sessionStorage.removeItem(AUTH_SESSION_KEY);
-      renderAuthGate();
+    logoutButton.addEventListener("click", async () => {
+      const client = getClient();
+      if (client) await client.auth.signOut();
+      await renderAuthGate();
       showMessage("You have been logged out.");
     });
   }
 
-  window.addEventListener("load", () => {
-    showMessage("Enter the admin password to access the dashboard.");
-    renderAuthGate();
+  window.addEventListener("load", async () => {
+    showMessage("Loading admin session…");
+    await renderAuthGate();
+
+    const client = getClient();
+    if (client) {
+      client.auth.onAuthStateChange(() => {
+        renderAuthGate();
+      });
+    }
   });
 })();
